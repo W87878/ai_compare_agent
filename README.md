@@ -1,5 +1,5 @@
 
-# 🎓 EduQ Agent - 教育顧問 AI 助理
+# 🎓 analyze Agent - 文件比較與分析 AI 助理
 
 ## 功能特色
 - 📄 比較兩份 PDF 文件，根據使用者提問做分析與回答
