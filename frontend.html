@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF 比較分析助手</title>
+  <style>
+    body {
+      font-family: 'Helvetica', sans-serif;
+      background-color: #f5f5f5;
+      padding: 40px;
+      max-width: 800px;
+      margin: auto;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 20px;
+    }
+
+    input[type="file"], textarea {
+      width: 100%;
+      margin-top: 5px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+
+    textarea {
+      resize: vertical;
+      height: 100px;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 12px 20px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    #thinking {
+      margin-top: 10px;
+      color: gray;
+      display: none;
+    }
+
+    pre {
+      background-color: #eee;
+      padding: 15px;
+      margin-top: 20px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>PDF 比較分析助手</h1>
+
+    <label for="file1">上傳第一份 PDF：</label>
+    <input type="file" id="file1" accept=".pdf">
+
+    <label for="file2">上傳第二份 PDF：</label>
+    <input type="file" id="file2" accept=".pdf">
+
+    <label for="question">請輸入你的問題：</label>
+    <textarea id="question" placeholder="例如：這兩份教材哪份對『貝氏定理』的解釋比較清楚？"></textarea>
+
+    <button id="btnStart" type="button">開始比較</button>
+
+    <div id="thinking">AI 正在思考中⋯⋯</div>
+
+    <label>AI 回覆：</label>
+    <pre id="output"></pre>
+  </div>
+
+  <script>
+    async function uploadFile(file) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData
+      });
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      return data.path;
+    }
+
+    function render(text) {
+      document.getElementById("output").textContent = text;
+    }
+
+    function thinkingText(show) {
+      document.getElementById("thinking").style.display = show ? "block" : "none";
+    }
+
+    async function startCompare() {
+      const file1 = document.getElementById("file1").files[0];
+      const file2 = document.getElementById("file2").files[0];
+      const question = document.getElementById("question").value;
+      const output = document.getElementById("output");
+      output.textContent = "";
+
+      if (!file1 || !file2 || !question.trim()) {
+        alert("請選擇兩個 PDF 檔案並輸入問題");
+        return;
+      }
+
+      thinkingText(true);
+
+      let file1Path, file2Path;
+      try {
+        file1Path = await uploadFile(file1);
+        file2Path = await uploadFile(file2);
+      } catch (err) {
+        console.error("上傳失敗:", err);
+        alert("上傳失敗，請檢查伺服器是否正常");
+        thinkingText(false);
+        return;
+      }
+
+      const socket = new WebSocket("ws://localhost:8000/ws/compare");
+      let isClosed = false;
+      let buffer = "";
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({
+          file1: file1Path,
+          file2: file2Path,
+          question: question
+        }));
+      };
+
+      socket.onmessage = (event) => {
+        const chunk = event.data;
+        if (chunk === "[DONE]") {
+          render(buffer);
+          thinkingText(false);
+          return;
+        }
+        if (chunk.trim().toLowerCase() === "ping") return;
+        buffer += chunk;
+        render(buffer);
+      };
+
+      socket.onerror = (event) => {
+        console.error("WebSocket 錯誤:", event);
+        alert("WebSocket 錯誤，請檢查後端是否正常");
+        thinkingText(false);
+      };
+
+      socket.onclose = () => {
+        isClosed = true;
+        thinkingText(false);
+      };
+
+      window.addEventListener("beforeunload", () => {
+        if (!isClosed) socket.close();
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("btnStart").addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          await startCompare();
+        } catch (err) {
+          console.error("Unhandled error in startCompare:", err);
+        }
+      });
+
+      document.getElementById("output").textContent = "";
+    });
+
+    // 防止 Enter 造成提交（除非在 textarea）
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+
+    // 全域錯誤處理
+    window.addEventListener("error", (e) => {
+      console.error("全域錯誤:", e.message);
+    });
+
+    window.addEventListener("beforeunload", () => {
+      console.warn("⚠️ 頁面即將刷新");
+    });
+  </script>
+</body>
+</html>
